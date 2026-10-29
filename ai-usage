@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Print remaining Claude Code and Codex plan usage, one line per tool.
+
+Uses the same endpoints as CodexBar / claude-monitor style tools:
+- Claude: GET api.anthropic.com/api/oauth/usage (token from macOS keychain)
+- Codex:  GET chatgpt.com/backend-api/wham/usage (token from ~/.codex/auth.json)
+
+--agent prints JSON for agents choosing a harness: it recommends the one
+whose weekly usage is furthest behind the time elapsed in its week.
+"""
+import json, os, subprocess, sys, urllib.request
+from datetime import datetime, timezone
+
+BAR = 10
+WEEK = 7 * 86400
+# Below this much 5-hour quota left, Claude Code is not recommended.
+MIN_5H_LEFT = 10.0
+
+
+def get(url, headers):
+    req = urllib.request.Request(url, headers={"User-Agent": "ai-usage", **headers})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.load(r)
+
+
+def window(used_pct, reset, window_secs):
+    """Normalise one limit window into a dict."""
+    used = max(0.0, min(100.0, float(used_pct or 0)))
+    w = {"used_pct": round(used, 1), "left_pct": round(100 - used, 1),
+         "resets_at": reset.isoformat() if reset else None,
+         "_reset": reset, "_secs": window_secs}
+    if reset:
+        remaining = max(0.0, (reset - datetime.now(timezone.utc)).total_seconds())
+        w["resets_in_hours"] = round(remaining / 3600, 1)
+        elapsed = max(0.0, min(100.0, (1 - remaining / window_secs) * 100))
+        w["elapsed_pct"] = round(elapsed, 1)
+        # Negative = used less than an even pace would by now.
+        w["pace_delta_pct"] = round(used - elapsed, 1)
+    return w
+
+
+def claude():
+    raw = subprocess.run(
+        ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+        capture_output=True, text=True, check=True).stdout
+    token = json.loads(raw)["claudeAiOauth"]["accessToken"]
+    d = get("https://api.anthropic.com/api/oauth/usage",
+            {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20"})
+    out = {}
+    for key, name, secs in (("seven_day", "weekly", WEEK), ("five_hour", "five_hour", 5 * 3600)):
+        w = d.get(key)
+        if w:
+            r = w.get("resets_at")
+            out[name] = window(w.get("utilization"),
+                               datetime.fromisoformat(r.replace("Z", "+00:00")) if r else None, secs)
+    return out
+
+
+def codex():
+    auth = json.load(open(os.path.expanduser("~/.codex/auth.json")))
+    t = auth["tokens"]
+    h = {"Authorization": f"Bearer {t['access_token']}"}
+    if t.get("account_id"):
+        h["ChatGPT-Account-Id"] = t["account_id"]
+    d = get("https://chatgpt.com/backend-api/wham/usage", h)
+    rl = d.get("rate_limit") or {}
+    wins = [w for w in (rl.get("primary_window"), rl.get("secondary_window")) if w]
+    out = {}
+    # Weekly = window of ~7 days; ignore shorter windows per plan.
+    for w in wins:
+        secs = w.get("limit_window_seconds") or WEEK
+        if secs >= 6 * 86400 or len(wins) == 1:
+            r = w.get("reset_at")
+            out["weekly"] = window(w.get("used_percent"),
+                                   datetime.fromtimestamp(r, timezone.utc) if r else None, secs)
+    return out
+
+
+def until(dt):
+    if not dt:
+        return "?"
+    s = max(int((dt - datetime.now(timezone.utc)).total_seconds()), 0)
+    d, h, m = s // 86400, s % 86400 // 3600, s % 3600 // 60
+    return f"{d}d {h}h" if d else f"{h}h {m}m"
+
+
+def seg(label, w, marker):
+    n = round(w["used_pct"] / 100 * BAR)
+    bar = '█' * n + '░' * (BAR - n)
+    # Mark how far through the window we are now.
+    if marker and "elapsed_pct" in w:
+        i = round(w["elapsed_pct"] / 100 * BAR)
+        bar = bar[:i] + '│' + bar[i:]
+    return f"{label} [{bar}] {w['left_pct']:3.0f}% left ({until(w['_reset'])})"
+
+
+def recommend(data):
+    candidates = []
+    for name, d in data.items():
+        wk = d.get("weekly")
+        if "error" in d or not wk or "pace_delta_pct" not in wk:
+            continue
+        fh = d.get("five_hour")
+        if wk["left_pct"] <= 0 or (fh and fh["left_pct"] < MIN_5H_LEFT):
+            continue
+        candidates.append((wk["pace_delta_pct"], name))
+    if not candidates:
+        return None, "no harness has usable quota data"
+    candidates.sort()
+    delta, name = candidates[0]
+    reason = f"{name} weekly usage is {abs(delta)} pts {'behind' if delta < 0 else 'ahead of'} week elapsed"
+    if len(candidates) > 1:
+        reason += f"; {candidates[1][1]} is {candidates[1][0]:+} pts"
+    return name, reason
+
+
+def strip(d):
+    return {k: ({kk: vv for kk, vv in v.items() if not kk.startswith("_")}
+                if isinstance(v, dict) else v) for k, v in d.items()}
+
+
+data = {}
+for name, fn in (("claude-code", claude), ("codex", codex)):
+    try:
+        data[name] = fn()
+    except Exception as e:
+        data[name] = {"error": str(e)}
+
+if "--agent" in sys.argv[1:]:
+    rec, reason = recommend(data)
+    print(json.dumps({
+        "recommended_harness": rec,
+        "reason": reason,
+        "rule": "prefer the harness with the lowest weekly pace_delta_pct (used_pct - elapsed_pct); "
+                f"skip any with 0% weekly left or under {MIN_5H_LEFT:.0f}% five_hour left",
+        "harnesses": {k: strip(v) for k, v in data.items()},
+    }, indent=2))
+else:
+    for name, label in (("claude-code", "Claude Code"), ("codex", "Codex")):
+        d = data[name]
+        if "error" in d:
+            print(f"{label:<12}error: {d['error']}")
+            continue
+        parts = [seg("wk", d["weekly"], True)] if "weekly" in d else []
+        if "five_hour" in d:
+            parts.append(seg("5h", d["five_hour"], False))
+        print(f"{label:<12}" + "   ".join(parts))
