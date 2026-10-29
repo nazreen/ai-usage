@@ -84,14 +84,34 @@ def until(dt):
     return f"{d}d {h}h" if d else f"{h}h {m}m"
 
 
-def seg(label, w, marker):
+# Colour only on a terminal, and never when NO_COLOR is set (no-color.org).
+COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+
+
+def rgb(hex_):
+    r, g, b = (int(hex_[i:i + 2], 16) for i in (1, 3, 5))
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+LABEL, DIM, EMPTY, MARK, BOLD, OK = rgb("#bb9af7"), rgb("#565f89"), rgb("#3b4261"), \
+    "\033[1;97m", "\033[1m", "\033[1;38;2;158;206;106m"
+TOOL_COLOR = {"claude-code": rgb("#ff9e64"), "codex": rgb("#2ac3de")}
+
+
+def c(code, text):
+    return f"{code}{text}\033[0m" if COLOR else text
+
+
+def seg(label, w, marker, used_color):
     n = round(w["used_pct"] / 100 * BAR)
-    bar = '█' * n + '░' * (BAR - n)
+    cells = [c(used_color, '█')] * n + [c(EMPTY, '░')] * (BAR - n)
     # Mark how far through the window we are now.
     if marker and "elapsed_pct" in w:
         i = round(w["elapsed_pct"] / 100 * BAR)
-        bar = bar[:i] + '│' + bar[i:]
-    return f"{label} [{bar}] {w['left_pct']:3.0f}% left ({until(w['_reset'])})"
+        cells.insert(i, c(MARK, '│'))
+    pct = c(BOLD, "%3.0f%%" % w["left_pct"])
+    reset = c(DIM, "(%s)" % until(w["_reset"]))
+    return f"{c(DIM, label)} [{''.join(cells)}] {pct} left {reset}"
 
 
 def recommend(data):
@@ -139,11 +159,11 @@ else:
     for name, label in (("claude-code", "Claude Code"), ("codex", "Codex")):
         d = data[name]
         if "error" in d:
-            print(f"{label:<12}error: {d['error']}")
+            print(f"{c(LABEL, f'{label:<12}')}error: {d['error']}")
             continue
-        parts = [seg("wk", d["weekly"], True)] if "weekly" in d else []
+        parts = [seg("wk", d["weekly"], True, TOOL_COLOR[name])] if "weekly" in d else []
         if "five_hour" in d:
-            parts.append(seg("5h", d["five_hour"], False))
-        print(f"{label:<12}" + "   ".join(parts))
+            parts.append(seg("5h", d["five_hour"], False, TOOL_COLOR[name]))
+        print(c(LABEL, f"{label:<12}") + "   ".join(parts))
     rec, reason = recommend(data)
-    print(f"{'Use':<12}{rec or 'none'} ({reason})")
+    print(c(LABEL, f"{'Use':<12}") + c(OK, rec or "none") + " " + c(DIM, f"({reason})"))

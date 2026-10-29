@@ -11,6 +11,7 @@ Use         claude-code (claude-code weekly usage is 0.8 pts ahead of week elaps
 - Filled blocks show usage spent. Light blocks show usage left.
 - `│` on a weekly bar marks how far through the week you are. Filled blocks past the marker mean you are using quota faster than an even pace.
 - Claude Code shows the weekly and 5-hour windows. Codex shows the weekly window.
+- Output is coloured on a terminal. Set `NO_COLOR=1` to turn colour off. Piped output and `--agent` are never coloured.
 - `Use` names the recommended harness, picked by the same rule as `--agent` (see below).
 
 ## Requirements
