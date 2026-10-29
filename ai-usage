@@ -145,3 +145,5 @@ else:
         if "five_hour" in d:
             parts.append(seg("5h", d["five_hour"], False))
         print(f"{label:<12}" + "   ".join(parts))
+    rec, reason = recommend(data)
+    print(f"{'Use':<12}{rec or 'none'} ({reason})")

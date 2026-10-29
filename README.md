@@ -5,11 +5,13 @@ A small CLI that prints how much of your Claude Code and Codex plan usage is lef
 ```
 Claude Code wk [██│░░░░░░░░]  82% left (5d 19h)   5h [█████░░░░░]  50% left (3h 44m)
 Codex       wk [██│███░░░░░]  49% left (5d 12h)
+Use         claude-code (claude-code weekly usage is 0.8 pts ahead of week elapsed; codex is +30.0 pts)
 ```
 
 - Filled blocks show usage spent. Light blocks show usage left.
 - `│` on a weekly bar marks how far through the week you are. Filled blocks past the marker mean you are using quota faster than an even pace.
 - Claude Code shows the weekly and 5-hour windows. Codex shows the weekly window.
+- `Use` names the recommended harness, picked by the same rule as `--agent` (see below).
 
 ## Requirements
 
