@@ -2,6 +2,8 @@
 
 A small CLI that prints how much of your Claude Code and Codex plan usage is left.
 
+![ai-usage output](docs/screenshot.png)
+
 ```
 Claude Code wk [██│░░░░░░░░]  82% left (5d 19h)   5h [█████░░░░░]  50% left (3h 44m)
 Codex       wk [██│███░░░░░]  49% left (5d 12h)
@@ -40,7 +42,7 @@ ai-usage --agent   # JSON for agents choosing a harness
 
 Prints JSON with `recommended_harness`, a `reason`, the `rule` used, and the raw numbers for each window.
 
-The recommended harness is the one with the lowest weekly `pace_delta_pct` (weekly % used minus % of the week elapsed). A harness is skipped if it has 0% weekly quota left, or if Claude Code has under 10% of its 5-hour quota left. If no harness has usable data, `recommended_harness` is `null`.
+The recommended harness is the one with the lowest weekly `pace_delta_pct` (weekly % used minus % of the week elapsed). A harness is skipped if it has 0% weekly quota left, or if Claude Code has under 10% of its 5-hour quota left. A harness whose usage could not be fetched is listed in `unavailable_harnesses` and named in `reason`. If no harness has usable data, `recommended_harness` is `null`.
 
 An agent rule might say: "Before picking a harness, run `ai-usage --agent` and use `recommended_harness`."
 
@@ -51,7 +53,9 @@ It calls the same endpoints the official clients use:
 - Claude Code: `GET https://api.anthropic.com/api/oauth/usage`, with the OAuth token read from the keychain item `Claude Code-credentials`.
 - Codex: `GET https://chatgpt.com/backend-api/wham/usage`, with the token read from `~/.codex/auth.json`.
 
-Tokens are read at run time and sent only to those two hosts. Nothing is written or cached.
+Tokens are read at run time and sent only to those two hosts. They are never written to disk.
+
+Each API response is cached for 60 seconds in `~/.cache/ai-usage/` (or `$XDG_CACHE_HOME/ai-usage/`), with file mode `600`, so repeated runs don't hit rate limits. Failed requests are not cached.
 
 These endpoints are not documented public APIs. They can change or break without notice.
 

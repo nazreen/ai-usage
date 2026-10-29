@@ -8,19 +8,37 @@ Uses the same endpoints as CodexBar / claude-monitor style tools:
 --agent prints JSON for agents choosing a harness: it recommends the one
 whose weekly usage is furthest behind the time elapsed in its week.
 """
-import json, os, subprocess, sys, urllib.request
+import json, os, subprocess, sys, time, urllib.request
 from datetime import datetime, timezone
 
 BAR = 10
 WEEK = 7 * 86400
 # Below this much 5-hour quota left, Claude Code is not recommended.
 MIN_5H_LEFT = 10.0
+# Reuse API responses this many seconds, so repeated runs don't hit rate limits.
+CACHE_TTL = 60
+CACHE_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "ai-usage")
 
 
-def get(url, headers):
+def get(url, headers, name):
+    path = os.path.join(CACHE_DIR, f"{name}.json")
+    try:
+        if time.time() - os.path.getmtime(path) < CACHE_TTL:
+            with open(path) as f:
+                return json.load(f)
+    except (OSError, ValueError):
+        pass
     req = urllib.request.Request(url, headers={"User-Agent": "ai-usage", **headers})
     with urllib.request.urlopen(req, timeout=15) as r:
-        return json.load(r)
+        d = json.load(r)
+    try:
+        os.makedirs(CACHE_DIR, mode=0o700, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(d, f)
+    except OSError:
+        pass
+    return d
 
 
 def window(used_pct, reset, window_secs):
@@ -45,7 +63,7 @@ def claude():
         capture_output=True, text=True, check=True).stdout
     token = json.loads(raw)["claudeAiOauth"]["accessToken"]
     d = get("https://api.anthropic.com/api/oauth/usage",
-            {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20"})
+            {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20"}, "claude-code")
     out = {}
     for key, name, secs in (("seven_day", "weekly", WEEK), ("five_hour", "five_hour", 5 * 3600)):
         w = d.get(key)
@@ -62,7 +80,7 @@ def codex():
     h = {"Authorization": f"Bearer {t['access_token']}"}
     if t.get("account_id"):
         h["ChatGPT-Account-Id"] = t["account_id"]
-    d = get("https://chatgpt.com/backend-api/wham/usage", h)
+    d = get("https://chatgpt.com/backend-api/wham/usage", h, "codex")
     rl = d.get("rate_limit") or {}
     wins = [w for w in (rl.get("primary_window"), rl.get("secondary_window")) if w]
     out = {}
@@ -115,23 +133,28 @@ def seg(label, w, marker, used_color):
 
 
 def recommend(data):
-    candidates = []
+    """Return (harness, reason, unavailable) where unavailable lists harnesses with no data."""
+    candidates, unavailable, skipped = [], [], []
     for name, d in data.items():
         wk = d.get("weekly")
         if "error" in d or not wk or "pace_delta_pct" not in wk:
+            unavailable.append(name)
             continue
         fh = d.get("five_hour")
         if wk["left_pct"] <= 0 or (fh and fh["left_pct"] < MIN_5H_LEFT):
+            skipped.append(name)
             continue
         candidates.append((wk["pace_delta_pct"], name))
+    notes = [f"{n} skipped: no usage data" for n in unavailable]
+    notes += [f"{n} skipped: quota nearly used up" for n in skipped]
     if not candidates:
-        return None, "no harness has usable quota data"
+        return None, "; ".join(notes or ["no harness has usable quota data"]), unavailable
     candidates.sort()
     delta, name = candidates[0]
     reason = f"{name} weekly usage is {abs(delta)} pts {'behind' if delta < 0 else 'ahead of'} week elapsed"
     if len(candidates) > 1:
         reason += f"; {candidates[1][1]} is {candidates[1][0]:+} pts"
-    return name, reason
+    return name, "; ".join([reason] + notes), unavailable
 
 
 def strip(d):
@@ -147,10 +170,11 @@ for name, fn in (("claude-code", claude), ("codex", codex)):
         data[name] = {"error": str(e)}
 
 if "--agent" in sys.argv[1:]:
-    rec, reason = recommend(data)
+    rec, reason, unavailable = recommend(data)
     print(json.dumps({
         "recommended_harness": rec,
         "reason": reason,
+        "unavailable_harnesses": unavailable,
         "rule": "prefer the harness with the lowest weekly pace_delta_pct (used_pct - elapsed_pct); "
                 f"skip any with 0% weekly left or under {MIN_5H_LEFT:.0f}% five_hour left",
         "harnesses": {k: strip(v) for k, v in data.items()},
@@ -165,5 +189,5 @@ else:
         if "five_hour" in d:
             parts.append(seg("5h", d["five_hour"], False, TOOL_COLOR[name]))
         print(c(LABEL, f"{label:<12}") + "   ".join(parts))
-    rec, reason = recommend(data)
+    rec, reason, _ = recommend(data)
     print(c(LABEL, f"{'Use':<12}") + c(OK, rec or "none") + " " + c(DIM, f"({reason})"))
