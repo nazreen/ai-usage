@@ -135,15 +135,15 @@ def c(code, text):
 
 
 def seg(label, w, marker, left_color):
-    n = round(w["left_pct"] / 100 * BAR)
+    n = round(w["used_pct"] / 100 * BAR)
     cells = [c(left_color, '█')] * n + [c(EMPTY, '░')] * (BAR - n)
-    # Mark how much of the window's time is left; quota filled past the mark is ahead of pace.
+    # Mark how much of the window's time has passed; quota filled past the mark is ahead of pace.
     if marker and "elapsed_pct" in w:
-        i = round((100 - w["elapsed_pct"]) / 100 * BAR)
+        i = round(w["elapsed_pct"] / 100 * BAR)
         cells.insert(i, c(MARK, '│'))
-    pct = c(BOLD, "%3.0f%%" % w["left_pct"])
+    pct = c(BOLD, "%3.0f%%" % w["used_pct"])
     reset = c(DIM, "(%s)" % until(w["_reset"]))
-    return f"{c(DIM, label)} [{''.join(cells)}] {pct} left {reset}"
+    return f"{c(DIM, label)} [{''.join(cells)}] {pct} used {reset}"
 
 
 def recommend(data):
