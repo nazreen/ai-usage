@@ -5,13 +5,13 @@ A small CLI that prints how much of your Claude Code and Codex plan usage is lef
 ![ai-usage output](docs/screenshot.png)
 
 ```
-Claude Code wk [██████░│░░░]  63% left (5d 2h)   5h [███░░░░░░░]  34% left (2h 27m)
-Codex       wk [███░░░░│░░░]  29% left (4d 20h)
+Claude Code wk [███│█░░░░░░]  38% used (5d 1h)   5h [████████░░]  81% used (1h 43m)
+Codex       wk [███│████░░░]  72% used (4d 19h)
 Use         claude-code (claude-code weekly usage is 9.9 pts ahead of week elapsed; codex is +40.1 pts)
 ```
 
-- Filled blocks show usage left, matching the `% left` number. Light blocks show usage spent.
-- `│` on a weekly bar marks how much of the week is left. Filled blocks ending before the marker mean you are using quota faster than an even pace.
+- Filled blocks show usage spent, matching the `% used` number. Light blocks show usage left.
+- `│` on a weekly bar marks how much of the week has passed, counted from the left. Filled blocks reaching past the marker mean you are using quota faster than an even pace.
 - Each tool shows its weekly window, and its 5-hour window when the plan has one.
 - Output is coloured on a terminal. Set `NO_COLOR=1` to turn colour off. Piped output and `--agent` are never coloured.
 - `Use` names the recommended harness, picked by the same rule as `--agent` (see below).
