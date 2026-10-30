@@ -13,8 +13,10 @@ from datetime import datetime, timezone
 
 BAR = 10
 WEEK = 7 * 86400
-# Below this much 5-hour quota left, Claude Code is not recommended.
+# Below this much 5-hour quota left, a harness is not recommended.
 MIN_5H_LEFT = 10.0
+# Suggest waiting for a skipped harness whose 5-hour window resets within this many minutes.
+WAIT_MINUTES = 60
 # Reuse API responses this many seconds, so repeated runs don't hit rate limits.
 CACHE_TTL = 60
 CACHE_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "ai-usage")
@@ -93,13 +95,16 @@ def codex():
     rl = d.get("rate_limit") or {}
     wins = [w for w in (rl.get("primary_window"), rl.get("secondary_window")) if w]
     out = {}
-    # Weekly = window of ~7 days; ignore shorter windows per plan.
+    # A window of up to 6 hours is the 5-hour window. Weekly = window of ~7 days,
+    # or the only other window the plan returns.
     for w in wins:
         secs = w.get("limit_window_seconds") or WEEK
-        if secs >= 6 * 86400 or len(wins) == 1:
-            r = w.get("reset_at")
-            out["weekly"] = window(w.get("used_percent"),
-                                   datetime.fromtimestamp(r, timezone.utc) if r else None, secs)
+        r = w.get("reset_at")
+        reset = datetime.fromtimestamp(r, timezone.utc) if r else None
+        if secs <= 6 * 3600:
+            out["five_hour"] = window(w.get("used_percent"), reset, secs)
+        elif secs >= 6 * 86400 or len(wins) == 1:
+            out["weekly"] = window(w.get("used_percent"), reset, secs)
     return out
 
 
@@ -129,12 +134,12 @@ def c(code, text):
     return f"{code}{text}\033[0m" if COLOR else text
 
 
-def seg(label, w, marker, used_color):
-    n = round(w["used_pct"] / 100 * BAR)
-    cells = [c(used_color, '█')] * n + [c(EMPTY, '░')] * (BAR - n)
-    # Mark how far through the window we are now.
+def seg(label, w, marker, left_color):
+    n = round(w["left_pct"] / 100 * BAR)
+    cells = [c(left_color, '█')] * n + [c(EMPTY, '░')] * (BAR - n)
+    # Mark how much of the window's time is left; quota filled past the mark is ahead of pace.
     if marker and "elapsed_pct" in w:
-        i = round(w["elapsed_pct"] / 100 * BAR)
+        i = round((100 - w["elapsed_pct"]) / 100 * BAR)
         cells.insert(i, c(MARK, '│'))
     pct = c(BOLD, "%3.0f%%" % w["left_pct"])
     reset = c(DIM, "(%s)" % until(w["_reset"]))
@@ -142,34 +147,59 @@ def seg(label, w, marker, used_color):
 
 
 def recommend(data):
-    """Return (harness, reason, unavailable) where unavailable lists harnesses with no data."""
-    candidates, unavailable, skipped = [], [], []
+    """Return (harness, reason, unavailable, wait).
+
+    unavailable lists harnesses with no data. wait names a harness skipped only for its
+    5-hour window that resets within WAIT_MINUTES and has a better weekly pace than the
+    recommended one (or there is no recommended one); otherwise it is None.
+    """
+    candidates, unavailable, skipped, waitable = [], [], [], []
     for name, d in data.items():
-        wk = d.get("weekly")
-        if "error" in d or not wk or "pace_delta_pct" not in wk:
+        wk, fh = d.get("weekly"), d.get("five_hour")
+        if "error" in d or not (wk or fh) or (wk and "pace_delta_pct" not in wk):
             unavailable.append(name)
             continue
-        fh = d.get("five_hour")
-        if wk["left_pct"] <= 0 or (fh and fh["left_pct"] < MIN_5H_LEFT):
-            skipped.append(name)
+        # Without a weekly window there is no weekly pace to compare.
+        if not wk:
+            skipped.append(f"{name} skipped: no weekly window")
+            continue
+        if wk["left_pct"] <= 0:
+            skipped.append(f"{name} skipped: weekly quota used up")
+            continue
+        if fh and fh["left_pct"] < MIN_5H_LEFT:
+            skipped.append(f"{name} skipped: 5h window at {fh['left_pct']:.0f}%, resets in {until(fh['_reset'])}")
+            if fh["_reset"]:
+                mins = (fh["_reset"] - datetime.now(timezone.utc)).total_seconds() / 60
+                if mins <= WAIT_MINUTES:
+                    waitable.append((wk["pace_delta_pct"], name, max(0, int(mins))))
             continue
         candidates.append((wk["pace_delta_pct"], name))
-    notes = [f"{n} skipped: no usage data" for n in unavailable]
-    notes += [f"{n} skipped: quota nearly used up" for n in skipped]
-    if not candidates:
-        return None, "; ".join(notes or ["no harness has usable quota data"]), unavailable
+    notes = [f"{n} skipped: no usage data" for n in unavailable] + skipped
     candidates.sort()
+    waitable.sort()
+    wait = None
+    if waitable and (not candidates or waitable[0][0] < candidates[0][0]):
+        delta, name, mins = waitable[0]
+        wait = {"harness": name, "resets_in_minutes": mins, "pace_delta_pct": delta}
+        notes.append(f"or wait {until(data[name]['five_hour']['_reset'])} for {name} "
+                     f"(weekly pace {delta:+} pts)")
+    if not candidates:
+        return None, "; ".join(notes or ["no harness has usable quota data"]), unavailable, wait
     delta, name = candidates[0]
     reason = f"{name} weekly usage is {abs(delta)} pts {'behind' if delta < 0 else 'ahead of'} week elapsed"
     if len(candidates) > 1:
         reason += f"; {candidates[1][1]} is {candidates[1][0]:+} pts"
-    return name, "; ".join([reason] + notes), unavailable
+    return name, "; ".join([reason] + notes), unavailable, wait
 
 
 def strip(d):
     return {k: ({kk: vv for kk, vv in v.items() if not kk.startswith("_")}
                 if isinstance(v, dict) else v) for k, v in d.items()}
 
+
+if {"-h", "--help"} & set(sys.argv[1:]):
+    print(__doc__.strip())
+    sys.exit(0)
 
 data = {}
 for name, fn in (("claude-code", claude), ("codex", codex)):
@@ -179,13 +209,16 @@ for name, fn in (("claude-code", claude), ("codex", codex)):
         data[name] = {"error": str(e)}
 
 if "--agent" in sys.argv[1:]:
-    rec, reason, unavailable = recommend(data)
+    rec, reason, unavailable, wait = recommend(data)
     print(json.dumps({
         "recommended_harness": rec,
         "reason": reason,
         "unavailable_harnesses": unavailable,
+        "wait_option": wait,
         "rule": "prefer the harness with the lowest weekly pace_delta_pct (used_pct - elapsed_pct); "
-                f"skip any with 0% weekly left or under {MIN_5H_LEFT:.0f}% five_hour left",
+                f"skip any with 0% weekly left or under {MIN_5H_LEFT:.0f}% five_hour left; "
+                f"wait_option names a skipped harness whose five_hour window resets within "
+                f"{WAIT_MINUTES} min and whose weekly pace is better",
         "harnesses": {k: strip(v) for k, v in data.items()},
     }, indent=2))
 else:
@@ -198,5 +231,5 @@ else:
         if "five_hour" in d:
             parts.append(seg("5h", d["five_hour"], False, TOOL_COLOR[name]))
         print(c(LABEL, f"{label:<12}") + "   ".join(parts))
-    rec, reason, _ = recommend(data)
+    rec, reason, _, _ = recommend(data)
     print(c(LABEL, f"{'Use':<12}") + c(OK, rec or "none") + " " + c(DIM, f"({reason})"))

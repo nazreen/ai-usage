@@ -5,14 +5,14 @@ A small CLI that prints how much of your Claude Code and Codex plan usage is lef
 ![ai-usage output](docs/screenshot.png)
 
 ```
-Claude Code wk [██│░░░░░░░░]  82% left (5d 19h)   5h [█████░░░░░]  50% left (3h 44m)
-Codex       wk [██│███░░░░░]  49% left (5d 12h)
-Use         claude-code (claude-code weekly usage is 0.8 pts ahead of week elapsed; codex is +30.0 pts)
+Claude Code wk [██████░│░░░]  63% left (5d 2h)   5h [███░░░░░░░]  34% left (2h 27m)
+Codex       wk [███░░░░│░░░]  29% left (4d 20h)
+Use         claude-code (claude-code weekly usage is 9.9 pts ahead of week elapsed; codex is +40.1 pts)
 ```
 
-- Filled blocks show usage spent. Light blocks show usage left.
-- `│` on a weekly bar marks how far through the week you are. Filled blocks past the marker mean you are using quota faster than an even pace.
-- Claude Code shows the weekly and 5-hour windows. Codex shows the weekly window.
+- Filled blocks show usage left, matching the `% left` number. Light blocks show usage spent.
+- `│` on a weekly bar marks how much of the week is left. Filled blocks ending before the marker mean you are using quota faster than an even pace.
+- Each tool shows its weekly window, and its 5-hour window when the plan has one.
 - Output is coloured on a terminal. Set `NO_COLOR=1` to turn colour off. Piped output and `--agent` are never coloured.
 - `Use` names the recommended harness, picked by the same rule as `--agent` (see below).
 
@@ -36,13 +36,16 @@ Make sure `~/.local/bin` is on your `PATH`.
 ```sh
 ai-usage           # one line per tool, with bars
 ai-usage --agent   # JSON for agents choosing a harness
+ai-usage --help    # what the tool does
 ```
 
 ### `--agent`
 
 Prints JSON with `recommended_harness`, a `reason`, the `rule` used, and the raw numbers for each window.
 
-The recommended harness is the one with the lowest weekly `pace_delta_pct` (weekly % used minus % of the week elapsed). A harness is skipped if it has 0% weekly quota left, or if Claude Code has under 10% of its 5-hour quota left. A harness whose usage could not be fetched is listed in `unavailable_harnesses` and named in `reason`. If no harness has usable data, `recommended_harness` is `null`.
+The recommended harness is the one with the lowest weekly `pace_delta_pct` (weekly % used minus % of the week elapsed). A harness is skipped if it has 0% weekly quota left, under 10% of its 5-hour quota left, or no weekly window. `reason` names each skipped harness and why. A harness whose usage could not be fetched is listed in `unavailable_harnesses` and named in `reason`. If no harness has usable data, `recommended_harness` is `null`.
+
+`wait_option` is set when a harness was skipped only for its 5-hour window, that window resets within 60 minutes, and its weekly pace is better than the recommended harness (or there is none). It gives `harness`, `resets_in_minutes` and `pace_delta_pct`. Otherwise it is `null`. The default output adds the same advice to `Use`, for example `or wait 0h 53m for claude-code (weekly pace +5.4 pts)`.
 
 An agent rule might say: "Before picking a harness, run `ai-usage --agent` and use `recommended_harness`."
 
