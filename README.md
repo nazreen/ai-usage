@@ -43,7 +43,7 @@ ai-usage --help    # what the tool does
 
 Prints JSON with `recommended_harness`, a `reason`, the `rule` used, and the raw numbers for each window.
 
-The recommended harness is the one with the lowest weekly `pace_delta_pct` (weekly % used minus % of the week elapsed). A harness is skipped if it has 0% weekly quota left, or under 10% of its 5-hour quota left. `reason` names each skipped harness and why. A harness whose usage could not be fetched is listed in `unavailable_harnesses` and named in `reason`. If no harness has usable data, `recommended_harness` is `null`.
+The recommended harness is the one with the lowest weekly `pace_delta_pct` (weekly % used minus % of the week elapsed). A harness is skipped if it has 0% weekly quota left, under 10% of its 5-hour quota left, or no weekly window. `reason` names each skipped harness and why. A harness whose usage could not be fetched is listed in `unavailable_harnesses` and named in `reason`. If no harness has usable data, `recommended_harness` is `null`.
 
 `wait_option` is set when a harness was skipped only for its 5-hour window, that window resets within 60 minutes, and its weekly pace is better than the recommended harness (or there is none). It gives `harness`, `resets_in_minutes` and `pace_delta_pct`. Otherwise it is `null`. The default output adds the same advice to `Use`, for example `or wait 0h 53m for claude-code (weekly pace +5.4 pts)`.
 

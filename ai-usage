@@ -95,15 +95,16 @@ def codex():
     rl = d.get("rate_limit") or {}
     wins = [w for w in (rl.get("primary_window"), rl.get("secondary_window")) if w]
     out = {}
-    # Weekly = window of ~7 days; a window of up to 6 hours is the 5-hour window.
+    # A window of up to 6 hours is the 5-hour window. Weekly = window of ~7 days,
+    # or the only other window the plan returns.
     for w in wins:
         secs = w.get("limit_window_seconds") or WEEK
         r = w.get("reset_at")
         reset = datetime.fromtimestamp(r, timezone.utc) if r else None
-        if secs >= 6 * 86400 or len(wins) == 1:
-            out["weekly"] = window(w.get("used_percent"), reset, secs)
-        elif secs <= 6 * 3600:
+        if secs <= 6 * 3600:
             out["five_hour"] = window(w.get("used_percent"), reset, secs)
+        elif secs >= 6 * 86400 or len(wins) == 1:
+            out["weekly"] = window(w.get("used_percent"), reset, secs)
     return out
 
 
@@ -154,11 +155,14 @@ def recommend(data):
     """
     candidates, unavailable, skipped, waitable = [], [], [], []
     for name, d in data.items():
-        wk = d.get("weekly")
-        if "error" in d or not wk or "pace_delta_pct" not in wk:
+        wk, fh = d.get("weekly"), d.get("five_hour")
+        if "error" in d or not (wk or fh) or (wk and "pace_delta_pct" not in wk):
             unavailable.append(name)
             continue
-        fh = d.get("five_hour")
+        # Without a weekly window there is no weekly pace to compare.
+        if not wk:
+            skipped.append(f"{name} skipped: no weekly window")
+            continue
         if wk["left_pct"] <= 0:
             skipped.append(f"{name} skipped: weekly quota used up")
             continue
