@@ -58,10 +58,19 @@ def window(used_pct, reset, window_secs):
 
 
 def claude():
-    raw = subprocess.run(
-        ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-        capture_output=True, text=True, check=True).stdout
-    token = json.loads(raw)["claudeAiOauth"]["accessToken"]
+    # Several items can share this service name (e.g. acct "unknown" holding only
+    # mcpOAuth); prefer the one Claude Code writes under the login user.
+    token = None
+    for acct in (["-a", os.environ.get("USER", "")], []):
+        r = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", *acct, "-w"],
+            capture_output=True, text=True)
+        if r.returncode == 0:
+            token = json.loads(r.stdout).get("claudeAiOauth", {}).get("accessToken")
+            if token:
+                break
+    if not token:
+        raise RuntimeError("no claude.ai login in keychain; run /login in claude")
     d = get("https://api.anthropic.com/api/oauth/usage",
             {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20"}, "claude-code")
     out = {}
