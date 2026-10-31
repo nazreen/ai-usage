@@ -7,6 +7,8 @@ Uses the same endpoints as CodexBar / claude-monitor style tools:
 
 --agent prints JSON for agents choosing a harness: it recommends the one
 whose weekly usage is furthest behind the time elapsed in its week.
+
+--pick prints only the recommended harness name, or "none" and exits 1.
 """
 import json, os, subprocess, sys, time, urllib.request
 from datetime import datetime, timezone
@@ -208,7 +210,11 @@ for name, fn in (("claude-code", claude), ("codex", codex)):
     except Exception as e:
         data[name] = {"error": str(e)}
 
-if "--agent" in sys.argv[1:]:
+if "--pick" in sys.argv[1:]:
+    rec = recommend(data)[0]
+    print(rec or "none")
+    sys.exit(0 if rec else 1)
+elif "--agent" in sys.argv[1:]:
     rec, reason, unavailable, wait = recommend(data)
     print(json.dumps({
         "recommended_harness": rec,
