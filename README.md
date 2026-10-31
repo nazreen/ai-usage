@@ -36,6 +36,7 @@ Make sure `~/.local/bin` is on your `PATH`.
 ```sh
 ai-usage           # one line per tool, with bars
 ai-usage --agent   # JSON for agents choosing a harness
+ai-usage --pick    # only the recommended harness name
 ai-usage --help    # what the tool does
 ```
 
@@ -48,6 +49,16 @@ The recommended harness is the one with the lowest weekly `pace_delta_pct` (week
 `wait_option` is set when a harness was skipped only for its 5-hour window, that window resets within 60 minutes, and its weekly pace is better than the recommended harness (or there is none). It gives `harness`, `resets_in_minutes` and `pace_delta_pct`. Otherwise it is `null`. The default output adds the same advice to `Use`, for example `or wait 0h 53m for claude-code (weekly pace +5.4 pts)`.
 
 An agent rule might say: "Before picking a harness, run `ai-usage --agent` and use `recommended_harness`."
+
+### `--pick`
+
+Prints only the recommended harness name, `claude-code` or `codex`, picked by the same rule as `--agent`. If no harness is usable, it prints `none` and exits with status 1. It is never coloured.
+
+Use it when a script or coordinator only needs to know which harness to start:
+
+```sh
+h=$(ai-usage --pick) || echo "no harness has quota"
+```
 
 ## How it works
 
